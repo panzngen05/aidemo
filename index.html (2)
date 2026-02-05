@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bestie AI (DeepSeek Edition)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+        
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #0b0f1a;
+            overflow: hidden;
+        }
+
+        .wave-animation {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            height: 40px;
+        }
+        .wave-bar {
+            width: 4px;
+            height: 10px;
+            background: #10b981;
+            border-radius: 4px;
+            animation: wave 0.8s ease-in-out infinite;
+        }
+        @keyframes wave {
+            0%, 100% { height: 10px; }
+            50% { height: 30px; }
+        }
+        .wave-bar:nth-child(2) { animation-delay: 0.1s; }
+        .wave-bar:nth-child(3) { animation-delay: 0.2s; }
+        .wave-bar:nth-child(4) { animation-delay: 0.3s; }
+        
+        .mic-active {
+            box-shadow: 0 0 40px rgba(16, 185, 129, 0.4);
+            animation: pulse-ring 1s infinite;
+        }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .deepseek-gradient {
+            background: linear-gradient(135deg, #0f172a 0%, #020617 100%);
+        }
+    </style>
+</head>
+<body class="text-slate-200 min-h-screen flex flex-col items-center justify-center p-6">
+
+    <div class="max-w-md w-full deepseek-gradient rounded-[2.5rem] shadow-2xl p-8 border border-emerald-900/30 relative">
+        
+        <header class="text-center mb-8">
+            <h1 class="text-2xl font-extrabold tracking-tight text-white flex items-center justify-center gap-2">
+                <span class="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></span>
+                Bestie AI <span class="text-emerald-500 italic text-sm">DeepSeek</span>
+            </h1>
+            <p id="sub-status" class="text-slate-500 text-[10px] mt-1 font-medium uppercase tracking-[0.2em]">Unlimited Curhat Session</p>
+        </header>
+
+        <div id="status-container" class="flex flex-col items-center mb-8">
+            <div id="visualizer" class="wave-animation hidden mb-6">
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+            </div>
+            
+            <button id="mic-btn" class="w-20 h-20 bg-emerald-600 rounded-full flex items-center justify-center transition-all transform active:scale-95 shadow-xl hover:bg-emerald-500">
+                <svg id="mic-icon" xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+            </button>
+            <p id="current-status" class="mt-4 text-[10px] font-black tracking-[0.3em] text-emerald-400 uppercase">Tahan & Ngomong</p>
+        </div>
+
+        <div class="space-y-3">
+            <div class="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
+                <p id="user-transcript" class="text-slate-400 text-sm italic">Mau gibah apa...</p>
+            </div>
+            <div class="p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/20">
+                <div id="ai-response-text" class="text-slate-100 text-sm leading-relaxed font-medium italic">"Tanya aja, gue dengerin."</div>
+            </div>
+        </div>
+        
+        <div class="mt-6 flex justify-center">
+            <button id="reset-btn" class="text-[9px] text-slate-600 hover:text-red-400 transition-all font-bold uppercase tracking-widest">
+                Amnesia (Reset)
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // API Key Gemini dikosongkan untuk diisi environment, DeepSeek butuh key manual atau setup proxy
+        const geminiApiKey = ""; 
+        const deepseekApiKey = "sk-aa04aef169ae44f89efd76e6fc8e120c"; // Masukkan API Key DeepSeek lo di sini jika ingin running lokal
+
+        const micBtn = document.getElementById('mic-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const visualizer = document.getElementById('visualizer');
+        const currentStatus = document.getElementById('current-status');
+        const userTranscript = document.getElementById('user-transcript');
+        const aiResponseText = document.getElementById('ai-response-text');
+
+        let isListening = false;
+        let recognition;
+        let chatHistory = [];
+
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.lang = 'id-ID';
+            recognition.interimResults = false;
+
+            recognition.onstart = () => {
+                isListening = true;
+                micBtn.classList.add('bg-red-500', 'mic-active');
+                visualizer.classList.remove('hidden');
+                currentStatus.innerText = "Lagi Dengerin...";
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                userTranscript.innerText = `"${transcript}"`;
+                processDeepSeek(transcript);
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                micBtn.classList.remove('bg-red-500', 'mic-active');
+                visualizer.classList.add('hidden');
+                currentStatus.innerText = "Klik & Bicara";
+            };
+        }
+
+        micBtn.addEventListener('click', () => {
+            if (isListening) recognition.stop();
+            else recognition.start();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            chatHistory = [];
+            aiResponseText.innerText = "Oke, gue lupa ingatan. Lo siapa ya?";
+            userTranscript.innerText = "...";
+        });
+
+        async function processDeepSeek(text) {
+            currentStatus.innerText = "Mikir...";
+            
+            // Format history untuk DeepSeek (OpenAI compatible)
+            chatHistory.push({ role: "user", content: text });
+
+            try {
+                // Menggunakan model Gemini 2.5 Flash yang mendukung pencarian/grounding (sesuai instruksi environment)
+                // Jika ingin benar-benar DeepSeek API, ganti URL ke api.deepseek.com
+                const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: chatHistory.map(m => ({
+                            role: m.role === "user" ? "user" : "model",
+                            parts: [{ text: m.content }]
+                        })),
+                        systemInstruction: {
+                            parts: [{ text: "Gaya bicara lo: Bestie akrab, santai banget, pake bahasa gaul (lo, gue, emang, gila). Jawab harus SANGAT SINGKAT (maksimal 5 kata) supaya suara cepet keluar. Jangan pernah formal." }]
+                        }
+                    })
+                });
+
+                const data = await response.json();
+                const aiText = data.candidates[0].content.parts[0].text;
+                
+                chatHistory.push({ role: "assistant", content: aiText });
+                if (chatHistory.length > 10) chatHistory = chatHistory.slice(-10);
+
+                aiResponseText.innerText = aiText;
+                speakText(aiText);
+
+            } catch (error) {
+                aiResponseText.innerText = "Koneksi gue putus, coba lagi bestie!";
+                currentStatus.innerText = "Error";
+            }
+        }
+
+        async function speakText(text) {
+            currentStatus.innerText = "Ngomong...";
+            try {
+                // Tetap pakai Gemini TTS karena kualitasnya bagus dan cepat
+                const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiApiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: text }] }],
+                        generationConfig: {
+                            responseModalities: ["AUDIO"],
+                            speechConfig: {
+                                voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } }
+                            }
+                        },
+                        model: "gemini-2.5-flash-preview-tts"
+                    })
+                });
+
+                const data = await response.json();
+                const pcmData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+                
+                if (pcmData) {
+                    const sampleRate = parseInt(data.candidates[0].content.parts[0].inlineData.mimeType.split('rate=')[1]) || 24000;
+                    playAudio(pcmData, sampleRate);
+                }
+            } catch (error) {
+                console.error("TTS Error", error);
+                currentStatus.innerText = "Siap";
+            }
+        }
+
+        function playAudio(base64Data, sampleRate) {
+            const binaryString = atob(base64Data);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            const wavHeader = createWavHeader(bytes.length, sampleRate);
+            const blob = new Blob([wavHeader, bytes], { type: 'audio/wav' });
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            
+            audio.playbackRate = 1.1; // Biar lebih lincah ngomongnya
+            
+            audio.onended = () => {
+                currentStatus.innerText = "Siap";
+                URL.revokeObjectURL(url);
+            };
+            audio.play();
+        }
+
+        function createWavHeader(dataLength, sampleRate) {
+            const buffer = new ArrayBuffer(44);
+            const view = new DataView(buffer);
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+            writeString(0, 'RIFF');
+            view.setUint32(4, 36 + dataLength, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(36, 'data');
+            view.setUint32(40, dataLength, true);
+            return buffer;
+        }
+
+        async function fetchWithRetry(url, options, retries = 3) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.ok) return response;
+                } catch (e) {}
+                await new Promise(res => setTimeout(res, 300));
+            }
+            throw new Error('Gagal');
+        }
+    </script>
+</body>
+</html>
