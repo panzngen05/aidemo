@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bestie AI</title>
+    <title>Bestie AI (DeepSeek Edition)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
@@ -59,7 +59,7 @@
         <header class="text-center mb-8">
             <h1 class="text-2xl font-extrabold tracking-tight text-white flex items-center justify-center gap-2">
                 <span class="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></span>
-                Bestie AI <span class="text-emerald-500 italic text-sm">Powered by CEO</span>
+                Bestie AI <span class="text-emerald-500 italic text-sm">Flash</span>
             </h1>
             <p id="sub-status" class="text-slate-500 text-[10px] mt-1 font-medium uppercase tracking-[0.2em]">Unlimited Curhat Session</p>
         </header>
@@ -97,9 +97,7 @@
     </div>
 
     <script>
-        // API Key Gemini dikosongkan untuk diisi environment, DeepSeek butuh key manual atau setup proxy
-        const geminiApiKey = "AIzaSyCqHJyUZtBxCMwCTwxVs4Y-FTEqDei7qZo"; 
-        const deepseekApiKey = "sk-aa04aef169ae44f89efd76e6fc8e120c"; // Masukkan API Key DeepSeek lo di sini jika ingin running lokal
+        const masterKey = typeof apiKey !== 'undefined' ? apiKey : "AIzaSyCqHJyUZtBxCMwCTwxVs4Y-FTEqDei7qZo"; 
 
         const micBtn = document.getElementById('mic-btn');
         const resetBtn = document.getElementById('reset-btn');
@@ -111,12 +109,25 @@
         let isListening = false;
         let recognition;
         let chatHistory = [];
+        let audioContext;
+
+        // Inisialisasi AudioContext secara eksplisit
+        async function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+            }
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+            return audioContext;
+        }
 
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
             recognition.lang = 'id-ID';
             recognition.interimResults = false;
+            recognition.continuous = false;
 
             recognition.onstart = () => {
                 isListening = true;
@@ -128,20 +139,35 @@
             recognition.onresult = (event) => {
                 const transcript = event.results[0][0].transcript;
                 userTranscript.innerText = `"${transcript}"`;
-                processDeepSeek(transcript);
+                processAI(transcript);
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Speech Error:", event.error);
+                currentStatus.innerText = "Mic Error!";
             };
 
             recognition.onend = () => {
                 isListening = false;
                 micBtn.classList.remove('bg-red-500', 'mic-active');
                 visualizer.classList.add('hidden');
-                currentStatus.innerText = "Klik & Bicara";
+                if(currentStatus.innerText === "Lagi Dengerin...") {
+                    currentStatus.innerText = "Klik & Bicara";
+                }
             };
         }
 
-        micBtn.addEventListener('click', () => {
-            if (isListening) recognition.stop();
-            else recognition.start();
+        micBtn.addEventListener('click', async () => {
+            await initAudio(); 
+            if (isListening) {
+                recognition.stop();
+            } else {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error("Recognition start fail:", e);
+                }
+            }
         });
 
         resetBtn.addEventListener('click', () => {
@@ -150,49 +176,44 @@
             userTranscript.innerText = "...";
         });
 
-        async function processDeepSeek(text) {
+        async function processAI(text) {
             currentStatus.innerText = "Mikir...";
-            
-            // Format history untuk DeepSeek (OpenAI compatible)
-            chatHistory.push({ role: "user", content: text });
+            chatHistory.push({ role: "user", parts: [{ text: text }] });
 
             try {
-                // Menggunakan model Gemini 2.5 Flash yang mendukung pencarian/grounding (sesuai instruksi environment)
-                // Jika ingin benar-benar DeepSeek API, ganti URL ke api.deepseek.com
-                const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiApiKey}`, {
+                const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${masterKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        contents: chatHistory.map(m => ({
-                            role: m.role === "user" ? "user" : "model",
-                            parts: [{ text: m.content }]
-                        })),
+                        contents: chatHistory,
                         systemInstruction: {
-                            parts: [{ text: "Gaya bicara lo: Bestie akrab, santai banget, pake bahasa gaul (lo, gue, emang, gila). Jawab harus SANGAT SINGKAT (maksimal 5 kata) supaya suara cepet keluar. Jangan pernah formal." }]
+                            parts: [{ text: "Lo adalah bestie akrab, santai banget, pake bahasa gaul Jakarta (lo, gue, emang, gila, parah). Jawab SANGAT SINGKAT (maksimal 5 kata) biar lincah. Jangan pernah pake format Markdown atau simbol aneh." }]
                         }
                     })
                 });
 
                 const data = await response.json();
+                if (!data.candidates) throw new Error("No response");
+                
                 const aiText = data.candidates[0].content.parts[0].text;
                 
-                chatHistory.push({ role: "assistant", content: aiText });
+                chatHistory.push({ role: "model", parts: [{ text: aiText }] });
                 if (chatHistory.length > 10) chatHistory = chatHistory.slice(-10);
 
                 aiResponseText.innerText = aiText;
                 speakText(aiText);
 
             } catch (error) {
-                aiResponseText.innerText = "Koneksi gue putus, coba lagi bestie!";
+                console.error("AI Error:", error);
+                aiResponseText.innerText = "Duh, koneksi lemot parah. Coba lagi!";
                 currentStatus.innerText = "Error";
             }
         }
 
         async function speakText(text) {
-            currentStatus.innerText = "Ngomong...";
+            currentStatus.innerText = "Nyiapin Suara...";
             try {
-                // Tetap pakai Gemini TTS karena kualitasnya bagus dan cepat
-                const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiApiKey}`, {
+                const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${masterKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -202,44 +223,54 @@
                             speechConfig: {
                                 voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } }
                             }
-                        },
-                        model: "gemini-2.5-flash-preview-tts"
+                        }
                     })
                 });
 
                 const data = await response.json();
-                const pcmData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+                const pcmDataBase64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
                 
-                if (pcmData) {
-                    const sampleRate = parseInt(data.candidates[0].content.parts[0].inlineData.mimeType.split('rate=')[1]) || 24000;
-                    playAudio(pcmData, sampleRate);
+                if (pcmDataBase64) {
+                    currentStatus.innerText = "Ngomong...";
+                    playAudio(pcmDataBase64, 24000);
+                } else {
+                    currentStatus.innerText = "Siap";
                 }
             } catch (error) {
-                console.error("TTS Error", error);
-                currentStatus.innerText = "Siap";
+                console.error("TTS Error:", error);
+                currentStatus.innerText = "Suara Gagal";
             }
         }
 
         function playAudio(base64Data, sampleRate) {
-            const binaryString = atob(base64Data);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
+            try {
+                const binaryString = atob(base64Data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
 
-            const wavHeader = createWavHeader(bytes.length, sampleRate);
-            const blob = new Blob([wavHeader, bytes], { type: 'audio/wav' });
-            const url = URL.createObjectURL(blob);
-            const audio = new Audio(url);
-            
-            audio.playbackRate = 1.1; // Biar lebih lincah ngomongnya
-            
-            audio.onended = () => {
-                currentStatus.innerText = "Siap";
-                URL.revokeObjectURL(url);
-            };
-            audio.play();
+                const wavHeader = createWavHeader(bytes.length, sampleRate);
+                const wavFile = new Uint8Array(wavHeader.byteLength + bytes.byteLength);
+                wavFile.set(new Uint8Array(wavHeader), 0);
+                wavFile.set(bytes, wavHeader.byteLength);
+
+                const blob = new Blob([wavFile], { type: 'audio/wav' });
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                
+                audio.onended = () => {
+                    currentStatus.innerText = "Siap";
+                    URL.revokeObjectURL(url);
+                };
+
+                audio.play().catch(err => {
+                    console.error("Playback error:", err);
+                    currentStatus.innerText = "Klik Tombol!";
+                });
+            } catch (err) {
+                console.error("Audio Processing Error:", err);
+            }
         }
 
         function createWavHeader(dataLength, sampleRate) {
@@ -250,13 +281,14 @@
                     view.setUint8(offset + i, string.charCodeAt(i));
                 }
             };
+
             writeString(0, 'RIFF');
             view.setUint32(4, 36 + dataLength, true);
             writeString(8, 'WAVE');
             writeString(12, 'fmt ');
             view.setUint32(16, 16, true);
-            view.setUint16(20, 1, true);
-            view.setUint16(22, 1, true);
+            view.setUint16(20, 1, true); // PCM
+            view.setUint16(22, 1, true); // Mono
             view.setUint32(24, sampleRate, true);
             view.setUint32(28, sampleRate * 2, true);
             view.setUint16(32, 2, true);
@@ -266,15 +298,22 @@
             return buffer;
         }
 
-        async function fetchWithRetry(url, options, retries = 3) {
+        async function fetchWithRetry(url, options, retries = 5) {
+            let lastError;
             for (let i = 0; i < retries; i++) {
                 try {
                     const response = await fetch(url, options);
                     if (response.ok) return response;
-                } catch (e) {}
-                await new Promise(res => setTimeout(res, 300));
+                    if (response.status === 429) { // Rate limit
+                        await new Promise(res => setTimeout(res, 2000));
+                        continue;
+                    }
+                } catch (e) {
+                    lastError = e;
+                }
+                await new Promise(res => setTimeout(res, 1000 * Math.pow(2, i)));
             }
-            throw new Error('Gagal');
+            throw lastError || new Error('Fetch failed after retries');
         }
     </script>
 </body>
